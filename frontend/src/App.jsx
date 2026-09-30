@@ -1,204 +1,659 @@
-import { useEffect, useState } from 'react';
+import {
+  useEffect,
+  useState
+} from "react";
+import {
+  BrowserRouter as Router,
+  Routes,
+  Route,
+  Navigate
+} from "react-router-dom";
 
-const API_URL = 'http://localhost:3000';
+import api, {
+  setAccessToken
+} from "./api";
+
+import "./App.css";
+
+import DashboardPage from "./pages/DashboardPage";
+import AboutPage from "./pages/AboutPage";
+import SettingsPage from "./pages/SettingsPage";
+
+const initialRegisterForm = {
+  name: "",
+  email: "",
+  password: ""
+};
+
+
+function getError(error) {
+  return (
+    error.response?.data?.message ||
+    "Произошла неизвестная ошибка"
+  );
+}
+
 
 function App() {
-  const [mode, setMode] = useState('login');
+  const [mode, setMode] =
+    useState("login");
 
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
+  const [user, setUser] =
+    useState(null);
 
-  const [message, setMessage] = useState('');
-  const [profile, setProfile] = useState(null);
-  const [loading, setLoading] = useState(false);
-
-  const token = localStorage.getItem('token');
-
+  const [loading, setLoading] =
+    useState(true);
+    
   useEffect(() => {
-    if (token) {
-      getProfile();
-    }
+    restoreSession();
   }, []);
 
-  async function getProfile() {
-    const savedToken = localStorage.getItem('token');
 
-    if (!savedToken) {
-      return;
-    }
-
+  async function restoreSession() {
     try {
-      const response = await fetch(`${API_URL}/profile`, {
-        headers: {
-          Authorization: `Bearer ${savedToken}`,
-        },
-      });
+      const response =
+        await api.post("/refresh");
 
-      const data = await response.json();
 
-      if (!response.ok) {
-        localStorage.removeItem('token');
-        setProfile(null);
-        return;
-      }
+      setAccessToken(
+        response.data.accessToken
+      );
 
-      setProfile(data.user);
-    } catch (error) {
-      setMessage('Не удалось подключиться к серверу');
-    }
-  }
 
-  async function handleSubmit(event) {
-    event.preventDefault();
-
-    setMessage('');
-    setLoading(true);
-
-    const endpoint = mode === 'login' ? '/login' : '/register';
-
-    try {
-      const response = await fetch(`${API_URL}${endpoint}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          email,
-          password,
-        }),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        setMessage(data.message || 'Произошла ошибка');
-        return;
-      }
-
-      if (mode === 'register') {
-        setMessage('Регистрация успешна! Теперь войдите.');
-        setMode('login');
-        setPassword('');
-      } else {
-        localStorage.setItem('token', data.token);
-        setMessage('Вход выполнен успешно!');
-        setPassword('');
-        await getProfile();
-      }
-    } catch (error) {
-      setMessage('Не удалось подключиться к серверу');
+      setUser(
+        response.data.user
+      );
+    } catch {
+      setAccessToken(null);
+      setUser(null);
     } finally {
       setLoading(false);
     }
   }
 
-  function logout() {
-    localStorage.removeItem('token');
-    setProfile(null);
-    setEmail('');
-    setPassword('');
-    setMessage('Вы вышли из аккаунта');
+
+  async function logout() {
+    try {
+      await api.post("/logout");
+    } finally {
+      setAccessToken(null);
+      setUser(null);
+    }
   }
 
-  if (profile) {
-    return (
-      <div className="app">
-        <div className="card">
-          <h1>Fullstack Auth</h1>
+  function ProtectedRoute({ children }) {
+  if (loading) {
+      return <div className="screen-center">Загрузка...</div>;
+  }
+    if (!user) {
+      return <Navigate to="/" replace />;
+    }
+    return children;
+  }
 
-          <div className="success">
-            Вы авторизованы
-          </div>
 
-          <h2>Профиль</h2>
-
-          <div className="profile">
-            <p>
-              <strong>ID:</strong> {profile.id}
-            </p>
-
-            <p>
-              <strong>Email:</strong> {profile.email}
-            </p>
-          </div>
-
-          <button onClick={logout}>
-            Выйти
-          </button>
+  if (loading) {
+  return (
+    <div className="screen-center">
+        Проверяем сессию...
         </div>
-      </div>
-    );
-  }
+  );
+}
 
   return (
-    <div className="app">
-      <div className="card">
-        <h1>Fullstack Auth</h1>
+    <Router>
+      <Routes>
+        <Route path="/" element={
+          user ? <Navigate to="/dashboard" replace /> : (
+            <AuthForm
+              mode={mode}
+              setMode={setMode}
+              onSuccess={newUser => {
+                setUser(newUser);
+              }}
+            />
+          )
+        } />
+        <Route path="/about" element={<AboutPage />} />
+        <Route path="/dashboard" element={
+          <ProtectedRoute>
+            <DashboardPage />
+          </ProtectedRoute>
+        } />
+        <Route path="/settings" element={
+          <ProtectedRoute>
+            <SettingsPage />
+          </ProtectedRoute>
+        } />
+      </Routes>
+    </Router>
+  );
+}
+
+function AuthForm({
+  mode,
+  setMode,
+  onSuccess
+}) {
+  const isLogin =
+    mode === "login";
+
+
+  const [form, setForm] =
+    useState(
+      isLogin
+        ? {
+            email: "",
+            password: ""
+          }
+        : initialRegisterForm
+    );
+
+
+  const [error, setError] =
+    useState("");
+
+
+  const [message, setMessage] =
+    useState("");
+
+
+  const [loading, setLoading] =
+    useState(false);
+
+
+  function changeMode(nextMode) {
+    setMode(nextMode);
+
+
+    if (nextMode === "login") {
+      setForm({
+        email: "",
+        password: ""
+      });
+    } else {
+      setForm({
+        ...initialRegisterForm
+      });
+    }
+
+
+    setError("");
+    setMessage("");
+  }
+
+
+  function update(
+    field,
+    value
+  ) {
+    setForm(prev => ({
+      ...prev,
+      [field]: value
+    }));
+  }
+
+
+  function validate() {
+    if (
+      !form.email.includes("@")
+    ) {
+      return "Введите корректный email";
+    }
+
+
+    if (
+      form.password.length < 6
+    ) {
+      return (
+        "Пароль должен содержать минимум 6 символов"
+      );
+    }
+
+
+    if (
+      !isLogin &&
+      form.name.trim().length < 2
+    ) {
+      return (
+        "Введите имя минимум из 2 символов"
+      );
+    }
+
+
+    return "";
+  }
+
+
+  async function submit(event) {
+    event.preventDefault();
+
+
+    setError("");
+    setMessage("");
+
+
+    const validationError =
+      validate();
+
+
+    if (validationError) {
+      setError(
+        validationError
+      );
+
+      return;
+    }
+
+
+    setLoading(true);
+
+
+    try {
+      if (isLogin) {
+
+        const response =
+          await api.post(
+            "/login",
+            {
+              email: form.email,
+              password:
+                form.password
+            }
+          );
+
+
+        setAccessToken(
+          response.data.accessToken
+        );
+
+
+        onSuccess(
+          response.data.user
+        );
+      } else {
+
+        await api.post(
+          "/register",
+          form
+        );
+
+
+        setMessage(
+          "Регистрация успешна. Теперь войдите."
+        );
+
+
+        setMode("login");
+
+
+        setForm({
+          email: form.email,
+          password: ""
+        });
+      }
+    } catch (error) {
+      setError(
+        getError(error)
+      );
+    } finally {
+      setLoading(false);
+    }
+  }
+
+
+  return (
+    <div className="screen-center">
+      <div className="auth-card">
+
+        <div className="brand">
+          <span>🔐</span>
+
+          <h1>
+            Fullstack Auth
+          </h1>
+        </div>
+
 
         <p className="subtitle">
-          JWT авторизация
+          {isLogin
+            ? "Войдите в свой аккаунт"
+            : "Создайте новый аккаунт"}
         </p>
 
+
         <div className="tabs">
+
           <button
-            className={mode === 'login' ? 'active' : ''}
-            onClick={() => {
-              setMode('login');
-              setMessage('');
-            }}
+            className={
+              isLogin
+                ? "tab active"
+                : "tab"
+            }
+            onClick={() =>
+              changeMode("login")
+            }
           >
             Вход
           </button>
 
+
           <button
-            className={mode === 'register' ? 'active' : ''}
-            onClick={() => {
-              setMode('register');
-              setMessage('');
-            }}
+            className={
+              !isLogin
+                ? "tab active"
+                : "tab"
+            }
+            onClick={() =>
+              changeMode("register")
+            }
           >
             Регистрация
           </button>
+
         </div>
 
-        <form onSubmit={handleSubmit}>
-          <label>Email</label>
 
-          <input
-            type="email"
-            value={email}
-            onChange={(event) => setEmail(event.target.value)}
-            placeholder="test@mail.com"
-            required
-          />
+        <form
+          onSubmit={submit}
+        >
 
-          <label>Пароль</label>
+          {!isLogin && (
+            <label>
+              Имя
 
-          <input
-            type="password"
-            value={password}
-            onChange={(event) => setPassword(event.target.value)}
-            placeholder="Введите пароль"
-            required
-          />
+              <input
+                value={form.name}
+                onChange={event =>
+                  update(
+                    "name",
+                    event.target.value
+                  )
+                }
+                placeholder="Введите имя"
+                maxLength={50}
+              />
+            </label>
+          )}
 
-          <button type="submit" disabled={loading}>
+
+          <label>
+            Email
+
+            <input
+              type="email"
+              value={form.email}
+              onChange={event =>
+                update(
+                  "email",
+                  event.target.value
+                )
+              }
+              placeholder="example@mail.com"
+              autoComplete="email"
+            />
+          </label>
+
+
+          <label>
+            Пароль
+
+            <input
+              type="password"
+              value={form.password}
+              onChange={event =>
+                update(
+                  "password",
+                  event.target.value
+                )
+              }
+              placeholder="Минимум 6 символов"
+              autoComplete={
+                isLogin
+                  ? "current-password"
+                  : "new-password"
+              }
+            />
+          </label>
+
+
+          {error && (
+            <div className="alert error">
+              {error}
+            </div>
+          )}
+
+
+          {message && (
+            <div className="alert success">
+              {message}
+            </div>
+          )}
+
+
+          <button
+            className="primary-button"
+            disabled={loading}
+          >
             {loading
-              ? 'Загрузка...'
-              : mode === 'login'
-                ? 'Войти'
-                : 'Зарегистрироваться'}
+              ? "Подождите..."
+              : isLogin
+                ? "Войти"
+                : "Создать аккаунт"}
           </button>
+
         </form>
 
-        {message && (
-          <p className="message">
-            {message}
-          </p>
-        )}
       </div>
     </div>
   );
 }
+
+function Profile({
+  user,
+  setUser,
+  logout
+}) {
+  const [name, setName] =
+    useState(user.name);
+
+
+  const [bio, setBio] =
+    useState(user.bio || "");
+
+
+  const [message, setMessage] =
+    useState("");
+
+
+  const [error, setError] =
+    useState("");
+
+
+  const [loading, setLoading] =
+    useState(false);
+
+
+  async function saveProfile(event) {
+    event.preventDefault();
+
+
+    setError("");
+    setMessage("");
+
+
+    if (
+      name.trim().length < 2
+    ) {
+      setError(
+        "Имя должно содержать минимум 2 символа"
+      );
+
+      return;
+    }
+
+
+    if (bio.length > 300) {
+      setError(
+        "Описание не должно превышать 300 символов"
+      );
+
+      return;
+    }
+
+
+    setLoading(true);
+
+
+    try {
+      const response =
+        await api.patch(
+          "/profile",
+          {
+            name: name.trim(),
+            bio: bio.trim()
+          }
+        );
+
+
+      setUser(
+        response.data.user
+      );
+
+
+      setName(
+        response.data.user.name
+      );
+
+
+      setBio(
+        response.data.user.bio
+      );
+
+
+      setMessage(
+        "Профиль сохранён"
+      );
+    } catch (error) {
+      setError(
+        getError(error)
+      );
+    } finally {
+      setLoading(false);
+    }
+  }
+
+
+  return (
+    <div className="profile-page">
+
+      <header className="topbar">
+
+        <strong>
+          🔐 Fullstack Auth
+        </strong>
+
+
+        <button
+          className="logout-button"
+          onClick={logout}
+        >
+          Выйти
+        </button>
+
+      </header>
+
+
+      <main className="profile-card">
+
+        <div className="avatar">
+          {user.name
+            .charAt(0)
+            .toUpperCase()}
+        </div>
+
+
+        <h1>
+          Профиль
+        </h1>
+
+
+        <p className="profile-email">
+          {user.email}
+        </p>
+
+
+        <form
+          onSubmit={saveProfile}
+        >
+
+          <label>
+            Имя
+
+            <input
+              value={name}
+              onChange={event =>
+                setName(
+                  event.target.value
+                )
+              }
+              maxLength={50}
+            />
+          </label>
+
+
+          <label>
+            О себе
+
+            <textarea
+              value={bio}
+              onChange={event =>
+                setBio(
+                  event.target.value
+                )
+              }
+              maxLength={300}
+              rows={5}
+              placeholder="Расскажите немного о себе"
+            />
+          </label>
+
+
+          <div className="counter">
+            {bio.length}/300
+          </div>
+
+
+          {error && (
+            <div className="alert error">
+              {error}
+            </div>
+          )}
+
+
+          {message && (
+            <div className="alert success">
+              {message}
+            </div>
+          )}
+
+
+          <button
+            className="primary-button"
+            disabled={loading}
+          >
+            {loading
+              ? "Сохраняем..."
+              : "Сохранить изменения"}
+          </button>
+
+        </form>
+
+      </main>
+
+    </div>
+  );
+}
+
 
 export default App;
